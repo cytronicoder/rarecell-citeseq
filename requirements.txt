@@ -1,0 +1,15 @@
+numpy
+pandas
+scipy
+scikit-learn
+matplotlib
+scanpy
+anndata
+muon
+mudata
+pyarrow
+pyyaml
+igraph
+leidenalg
+pytest
+jupyter

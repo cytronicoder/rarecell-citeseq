@@ -1,0 +1,13 @@
+# Example benchmark configuration.
+# Copy this file to benchmark_config.yaml and adjust the paths before running.
+# Data files are not committed to git; see README for placement instructions.
+
+dataset: pbmc5k
+dataset_path: data/processed/pbmc5k_representations.h5ad
+label_column: cell_type_simple     # adata.obs column holding cell-type labels
+target_cell_type: "B cell"         # target rare population; null = auto-select smallest
+control_cell_type: null            # abundant-cell control; null = auto-select largest
+fractions: [ 1.0, 0.5, 0.25, 0.1, 0.05 ]
+seeds: [ 0, 1, 2, 3, 4 ]
+representations: [ rna_pca, protein_pca, joint_pca ]
+k_neighbors: 15
