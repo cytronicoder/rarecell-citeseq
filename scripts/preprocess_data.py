@@ -19,7 +19,7 @@ from rarecell.config import DATA_DIR, FIGURES_DIR, LOGS_DIR, REPRESENTATION_KEY_
 from rarecell.io import get_cell_labels, get_protein_matrix, get_rna_adata, load_citeseq, save_citeseq_object
 from rarecell.plotting import plot_bar_counts, plot_embedding
 from rarecell.preprocessing import align_cells_between_modalities, preprocess_protein, preprocess_rna
-from rarecell.qc import make_candidate_target_population_table
+from rarecell.io import make_candidate_target_population_table
 from rarecell.representations import (
     compute_joint_pca_representation,
     compute_protein_pca,
@@ -27,7 +27,7 @@ from rarecell.representations import (
     compute_umap_from_embedding,
     save_embedding,
 )
-from rarecell.script_utils import setup_file_logger
+from rarecell.utils import setup_file_logger
 from rarecell.utils import write_json
 
 
@@ -86,7 +86,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--figures-dir", default=str(FIGURES_DIR), help="Directory for figures.")
     parser.add_argument(
         "--output",
-        default=str(DATA_DIR / "processed" / "pbmc5k_representations.h5ad"),
+        default=str(DATA_DIR / "processed" / "pbmc5k_10x_citeseq_representations.h5ad"),
         help="Path to save the processed object with benchmark representations.",
     )
     parser.add_argument("--rna-pcs", type=int, default=30, help="Number of RNA PCs.")

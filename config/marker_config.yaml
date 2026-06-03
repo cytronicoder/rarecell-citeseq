@@ -1,0 +1,16 @@
+markers:
+  B cell:
+    rna: [MS4A1, CD79A, CD79B, BANK1]
+    protein: [CD19, CD20, CD45RA]
+  NK cell:
+    rna: [NKG7, GNLY, KLRD1, PRF1]
+    protein: [CD56, CD16]
+  CD14 monocyte:
+    rna: [LYZ, S100A8, S100A9, FCN1, CD14]
+    protein: [CD14]
+  CD8 T cell:
+    rna: [CD3D, CD3E, CD8A, CD8B, GZMK]
+    protein: [CD3, CD8]
+  CD4 T cell:
+    rna: [CD3D, CD3E, IL7R, CCR7, CD4]
+    protein: [CD3, CD4]

@@ -4,7 +4,7 @@ import pytest
 
 ad = pytest.importorskip("anndata")
 
-from rarecell.qc import (
+from rarecell.io import (
     make_candidate_target_population_table,
     make_protein_feature_table,
     make_protein_qc_cell_table,

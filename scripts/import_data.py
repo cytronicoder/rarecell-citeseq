@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from rarecell.config import FIGURES_DIR, LOGS_DIR, TABLES_DIR
 from rarecell.io import get_cell_labels, get_protein_matrix, get_rna_adata, load_citeseq
 from rarecell.plotting import plot_bar_counts, plot_histogram, plot_qc_summary
-from rarecell.qc import (
+from rarecell.io import (
     make_candidate_target_population_table,
     make_dataset_summary,
     make_protein_feature_table,
@@ -23,7 +23,7 @@ from rarecell.qc import (
     save_summary_tables,
     summarize_cell_labels,
 )
-from rarecell.script_utils import setup_file_logger
+from rarecell.utils import setup_file_logger
 
 
 def parse_args() -> argparse.Namespace:

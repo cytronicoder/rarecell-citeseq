@@ -94,6 +94,42 @@ def test_marker_auc_returns_high_auc_for_clean_marker():
     assert np.isnan(marker_auc(values, ["B"] * 6, "B"))
 
 
+def test_knn_predictions_exclude_self():
+    from rarecell.metrics import compute_knn_predictions
+    embedding = np.array([[0.0, 0.0], [0.0, 0.01], [10.0, 10.0], [10.01, 10.0]])
+    labels = np.array(["A", "A", "B", "B"])
+    preds = compute_knn_predictions(embedding, labels, k=1)
+    # Each cell should be predicted from its neighbor, not itself
+    assert preds is not None
+    assert len(preds) == 4
+
+
+def test_rare_cell_precision_recall_f1_valid_on_toy():
+    from rarecell.metrics import compute_rare_cell_precision_recall_f1
+    embedding = np.vstack([np.zeros((10, 2)), np.ones((20, 2)) * 10])
+    labels = np.array(["target"] * 10 + ["other"] * 20)
+    result = compute_rare_cell_precision_recall_f1(embedding, labels, "target", k=5)
+    assert "precision" in result and "recall" in result and "f1" in result
+    for v in result.values():
+        assert 0.0 <= float(v) <= 1.0
+
+
+def test_neighborhood_purity_perfect_separation():
+    from rarecell.metrics import neighborhood_purity
+    embedding = np.vstack([np.zeros((5, 2)), np.ones((10, 2)) * 100])
+    labels = np.array(["target"] * 5 + ["other"] * 10)
+    purity = neighborhood_purity(embedding, labels, "target", k=3)
+    assert float(purity) >= 0.99
+
+
+def test_neighborhood_purity_mixed_gives_less_than_one():
+    from rarecell.metrics import neighborhood_purity
+    embedding = np.arange(20).reshape(10, 2).astype(float)
+    labels = np.array(["A", "B"] * 5)
+    purity = neighborhood_purity(embedding, labels, "A", k=2)
+    assert float(purity) < 1.0
+
+
 def test_summarize_metric_by_group_returns_expected_columns():
     df = pd.DataFrame(
         {

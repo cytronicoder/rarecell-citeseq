@@ -1,5 +1,5 @@
-dataset: pbmc5k
-dataset_path: data/processed/pbmc5k_representations.h5ad
+dataset: pbmc5k_10x_citeseq
+dataset_path: data/processed/pbmc5k_10x_citeseq_representations.h5ad
 label_column: leiden
 target_cell_type: "15"
 control_cell_type: null

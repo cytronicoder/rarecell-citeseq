@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.sparse import SparseEfficiencyWarning
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -11,7 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 ad = pytest.importorskip("anndata")
 
 from rarecell import benchmark
-from rarecell.benchmark_plots import save_all_standard_plots
+from rarecell.plotting import save_all_standard_plots
 from rarecell.config import REPRESENTATION_KEY_MAP
 
 
@@ -40,7 +41,7 @@ def make_benchmark_adata():
     return adata
 
 
-def test_benchmark_outputs(tmp_path, monkeypatch):
+def test_benchmark_outputs(tmp_path, monkeypatch, recwarn):
     tables_dir = tmp_path / "tables"
     metrics_dir = tmp_path / "metrics"
     reports_dir = tmp_path / "reports"
@@ -107,3 +108,8 @@ def test_benchmark_outputs(tmp_path, monkeypatch):
         metric_summary=metric_summary,
     )
     assert report_path.exists()
+
+    sparse_warns = [w for w in recwarn.list if issubclass(w.category, SparseEfficiencyWarning)]
+    assert sparse_warns == [], (
+        f"SparseEfficiencyWarning leaked from sc.pp.neighbors: {sparse_warns}"
+    )

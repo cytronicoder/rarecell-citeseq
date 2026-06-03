@@ -4,7 +4,7 @@ import pytest
 
 ad = pytest.importorskip("anndata")
 
-from rarecell.validation import resolve_label_key, resolve_target_label
+from rarecell.utils import resolve_label_key, resolve_target_label
 
 
 def test_resolve_label_key_prefers_available_annotation():

@@ -148,7 +148,13 @@ def preprocess_rna(
     if rna.n_obs >= 3 and n_components >= 2:
         n_neighbors = min(15, rna.n_obs - 1)
         try:
-            sc.pp.neighbors(rna, n_neighbors=n_neighbors, n_pcs=n_components)
+            # SparseEfficiencyWarning is raised by scipy when scanpy sets diagonal
+            # elements of the CSR distances matrix it builds internally. The
+            # mutation is inside scanpy/scipy, not our code, and the result is
+            # still correct, so we suppress only that warning here.
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=sparse.SparseEfficiencyWarning)
+                sc.pp.neighbors(rna, n_neighbors=n_neighbors, n_pcs=n_components)
             try:
                 sc.tl.umap(rna, random_state=0)
             except Exception as exc:

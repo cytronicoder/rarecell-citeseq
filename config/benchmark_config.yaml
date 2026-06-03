@@ -1,9 +1,37 @@
+# Rare-cell CITE-seq downsampling benchmark configuration
+# Edit this file before running scripts/run_downsampling_benchmark.py
+
 dataset: pbmc5k_10x_citeseq
 dataset_path: data/processed/pbmc5k_10x_citeseq_representations.h5ad
+
+# Cell-type label column in adata.obs
 label_column: leiden
+
+# Target cell type to downsample (null = auto-select the second most abundant cell type)
 target_cell_type: null
+
+# Abundant-cell control type (null = auto-select the most abundant non-target)
 control_cell_type: null
-fractions: [ 1.0, 0.5, 0.25, 0.1, 0.05 ]
-seeds: [ 0, 1, 2, 3, 4 ]
-representations: [ rna_pca, protein_pca, joint_pca ]
+
+# Downsampling fractions (fraction of target cells to retain)
+fractions: [1.0, 0.5, 0.25, 0.1, 0.05]
+
+# Random seeds for downsampling replicates
+seeds: [0, 1, 2, 3, 4]
+
+# Representations to evaluate
+representations: [rna_pca, protein_pca, joint_pca]
+
+# Number of nearest neighbors for kNN metrics
 k_neighbors: 15
+
+# Control flags
+run_abundant_control: true
+run_random_label_control: true
+run_marker_removal_sensitivity: false
+
+# Fraction to use for the UMAP comparison figure (null = use the smallest fraction)
+severe_fraction_for_umap: null
+
+# Output directory (relative to project root)
+output_dir: results

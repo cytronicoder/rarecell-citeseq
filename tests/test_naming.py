@@ -1,6 +1,6 @@
 import pytest
 
-from rarecell.naming import resolve_existing_output_prefix
+from rarecell.utils import resolve_existing_output_prefix
 
 
 def test_resolve_existing_output_prefix_prefers_existing_requested_prefix(tmp_path):
@@ -17,5 +17,5 @@ def test_resolve_existing_output_prefix_falls_back_to_matching_table(tmp_path):
 
 
 def test_resolve_existing_output_prefix_raises_when_no_results_exist(tmp_path):
-    with pytest.raises(FileNotFoundError, match="Run notebooks/rare_cell_downsampling_benchmark"):
+    with pytest.raises(FileNotFoundError, match="Run notebooks/03_downsampling_benchmark"):
         resolve_existing_output_prefix(tmp_path, "pbmc5k_b_cell")

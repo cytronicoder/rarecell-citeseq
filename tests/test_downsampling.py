@@ -79,3 +79,20 @@ def test_downsampling_metadata_and_counts_table():
     assert result.obs["is_target_cell"].to_numpy().tolist() == expected.to_numpy().tolist()
     counts = get_target_counts(result, "cell_type")
     assert list(counts.columns) == ["label", "n_cells", "fraction"]
+
+
+def test_fraction_one_returns_all_target_cells():
+    adata = make_adata()
+    result = downsample_target_cells(adata, "cell_type", "B", retain_fraction=1.0, seed=0)
+    assert (result.obs["cell_type"].astype(str) == "B").sum() == 6
+    assert result.n_obs == adata.n_obs
+
+
+def test_invalid_fraction_zero_raises():
+    with pytest.raises(ValueError):
+        downsample_target_cells(make_adata(), "cell_type", "B", retain_fraction=0.0)
+
+
+def test_missing_target_label_raises():
+    with pytest.raises(ValueError, match="not present"):
+        downsample_target_cells(make_adata(), "cell_type", "Nonexistent", retain_fraction=0.5)

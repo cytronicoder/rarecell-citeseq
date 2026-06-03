@@ -30,6 +30,9 @@ data/*
 !data/README.md
 !data/.gitkeep
 
+# Stale matplotlib config cache written inside src/ (bug now fixed; exclude as safety net)
+src/results/
+
 # Generated results — keep only the empty .gitkeep placeholders
 results/figures/*
 !results/figures/.gitkeep

@@ -15,14 +15,22 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from rarecell.config import DATA_DIR, REPRESENTATION_KEY_MAP
 from rarecell.io import load_anndata
-from rarecell.script_utils import resolve_representations, setup_file_logger
+from rarecell.utils import resolve_representations, setup_file_logger
 from rarecell.utils import write_json
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", default=str(DATA_DIR / "processed" / "pbmc5k_representations.h5ad"))
-    parser.add_argument("--label-key", default="cell_type_simple")
+    parser.add_argument(
+        "--input",
+        default=str(DATA_DIR / "processed" / "pbmc5k_10x_citeseq_representations.h5ad"),
+        help="Path to processed .h5ad file with benchmark representations.",
+    )
+    parser.add_argument(
+        "--label-key",
+        default="leiden",
+        help="Cell-type label column in adata.obs.",
+    )
     parser.add_argument("--target-label", default=None)
     parser.add_argument(
         "--representations",

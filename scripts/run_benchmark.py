@@ -51,10 +51,15 @@ from rarecell.benchmark import (
     write_markdown_report,
 )
 from rarecell.downsampling import summarize_downsampling_grid, validate_target_label
-from rarecell.io_utils import resolve_input_file
-from rarecell.benchmark_plots import save_all_standard_plots
+from rarecell.io import resolve_input_file
+from rarecell.plotting import save_all_standard_plots
 
-DEFAULT_INPUT = "data/processed/pbmc5k_representations.h5ad"
+DEFAULT_INPUT = "data/processed/pbmc5k_10x_citeseq_representations.h5ad"
+# Fallback for older processed files produced by preprocess_data.py
+_FALLBACK_INPUTS = [
+    "data/processed/pbmc5k_10x_citeseq_representations.h5ad",
+    "data/processed/pbmc5k_representations.h5ad",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -65,24 +70,35 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input",
         default=DEFAULT_INPUT,
-        help="Path to the processed AnnData .h5ad input file.",
+        help=(
+            "Path to the processed AnnData .h5ad input file. "
+            "Must contain protein_counts in obsm and benchmark representations."
+        ),
     )
     parser.add_argument(
         "--label-key",
-        default="cell_type_simple",
-        help="adata.obs column containing cell-type labels.",
+        default="leiden",
+        help=(
+            "adata.obs column containing cell-type labels. "
+            "Defaults to 'leiden' (Leiden cluster IDs from the current preprocessing pipeline). "
+            "Use 'cell_type_simple' for objects built with preprocess_data.py."
+        ),
     )
     parser.add_argument(
         "--target-label",
-        default="B cell",
-        help="Cell-type label of the rare target population to benchmark.",
+        default=None,
+        help=(
+            "Cell-type label of the rare target population. "
+            "If omitted, the second-smallest class in label-key is used automatically."
+        ),
     )
     parser.add_argument(
         "--output-prefix",
-        default="pbmc5k_b_cell",
+        default=None,
         help=(
-            "Prefix for all output files, e.g. 'pbmc5k_b_cell'. "
-            "Outputs follow the pattern {output_prefix}__{descriptor}.{ext}."
+            "Prefix for all output files, e.g. 'pbmc5k_14'. "
+            "Outputs follow the pattern {output_prefix}__{descriptor}.{ext}. "
+            "If omitted, auto-generated from dataset name and target label."
         ),
     )
     parser.add_argument(
@@ -141,19 +157,44 @@ def _load_and_validate(args: argparse.Namespace):
     try:
         input_path = resolve_input_file(
             args.input,
-            default_candidates=[DEFAULT_INPUT],
+            default_candidates=_FALLBACK_INPUTS,
         )
     except FileNotFoundError as exc:
         raise FileNotFoundError(
-            "Requested input file was not found:\n"
-            f"{args.input}\n"
-            "To run the full benchmark, first create this file using the preprocessing pipeline.\n"
-            "For a quick validation run, use:\n"
-            "python scripts/run_smoke_test.py"
+            "Processed input file not found:\n"
+            f"  {args.input}\n\n"
+            "Expected location: data/processed/pbmc5k_10x_citeseq_representations.h5ad\n"
+            "This file is created by:\n"
+            "  python scripts/preprocess_data.py\n"
+            "or the notebooks/baseline_representations.ipynb notebook.\n\n"
+            "For a quick validation run without preprocessing:\n"
+            "  python scripts/run_smoke_test.py"
         ) from exc
 
     logging.info("Loading AnnData: %s", input_path)
     adata = ad.read_h5ad(input_path)
+
+    # Resolve label_key from adata if the default doesn't exist
+    from rarecell.utils import resolve_label_key, resolve_target_label
+    resolved_label_key = resolve_label_key(adata, preferred=args.label_key)
+    if resolved_label_key != args.label_key:
+        logging.info(
+            "Label key '%s' not found; using '%s' instead.", args.label_key, resolved_label_key
+        )
+        args.label_key = resolved_label_key
+
+    # Auto-select target label if not specified
+    if args.target_label is None:
+        args.target_label = resolve_target_label(adata, args.label_key, preferred=None)
+        logging.info("Auto-selected target label: '%s'", args.target_label)
+
+    # Auto-generate output prefix if not specified
+    if args.output_prefix is None:
+        from rarecell.utils import make_output_prefix
+        dataset_name = Path(input_path).stem.replace("_representations", "").replace("_processed", "")
+        args.output_prefix = make_output_prefix(dataset_name, args.target_label)
+        logging.info("Auto-generated output prefix: '%s'", args.output_prefix)
+
     validate_target_label(adata, args.label_key, args.target_label)
     validate_representations(adata, args.representations)
     return input_path, adata

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ from rarecell.downsampling import downsample_target_cells, validate_target_label
 from rarecell.metrics import compute_all_metrics
 from rarecell.preprocessing import preprocess_protein, preprocess_rna
 from rarecell.representations import build_joint_representation
-from rarecell.script_utils import resolve_representations, standard_representation_name
+from rarecell.utils import resolve_representations, standard_representation_name
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = PROJECT_ROOT / "results"
@@ -120,58 +121,103 @@ def run_downsampling_benchmark(
         rna_pcs: int = 50,
         protein_pcs: int = 20,
         n_top_genes: int = 3000,
+        logger: logging.Logger | None = None,
+        show_progress: bool = False,
 ) -> pd.DataFrame:
     """Run the full benchmark, rebuilding representations after downsampling."""
+    log = logger or logging.getLogger(__name__)
     validate_target_label(adata, label_key, target_label)
     requested_representations = representation_keys or list(REPRESENTATION_KEY_MAP)
     original_labels = adata.obs[label_key].astype(str)
     n_target_original = int((original_labels == str(target_label)).sum())
 
     rows = []
-    for retain_fraction in retain_fractions:
-        for seed in seeds:
-            adata_sub = downsample_target_cells(
-                adata,
-                label_key=label_key,
-                target_label=target_label,
-                retain_fraction=float(retain_fraction),
-                seed=int(seed),
+    conditions = [(float(retain_fraction), int(seed)) for retain_fraction in retain_fractions for seed in seeds]
+    iterator = conditions
+    if show_progress:
+        try:
+            from tqdm import tqdm
+
+            iterator = tqdm(conditions, desc=f"benchmark target={target_label}")
+        except Exception:
+            log.info("tqdm is unavailable; benchmark progress will be reported through log messages.")
+
+    for condition_index, (retain_fraction, seed) in enumerate(iterator, start=1):
+        condition_started = time.perf_counter()
+        log.info(
+            "Running benchmark condition %d/%d: target=%s fraction=%s seed=%s",
+            condition_index,
+            len(conditions),
+            target_label,
+            retain_fraction,
+            seed,
+        )
+        adata_sub = downsample_target_cells(
+            adata,
+            label_key=label_key,
+            target_label=target_label,
+            retain_fraction=retain_fraction,
+            seed=seed,
+        )
+        rebuild_started = time.perf_counter()
+        rebuilt = rebuild_baseline_representations(
+            adata_sub,
+            rna_pcs=int(rna_pcs),
+            protein_pcs=int(protein_pcs),
+            n_top_genes=int(n_top_genes),
+        )
+        log.info(
+            "Rebuilt representations for target=%s fraction=%s seed=%s in %.2fs",
+            target_label,
+            retain_fraction,
+            seed,
+            time.perf_counter() - rebuild_started,
+        )
+        representation_pairs = resolve_representations(rebuilt, requested_representations)
+        labels = rebuilt.obs[label_key].astype(str).to_numpy()
+        for representation_name, representation_key in representation_pairs:
+            metric_started = time.perf_counter()
+            embedding = rebuilt.obsm[representation_key]
+            metrics = compute_all_metrics(
+                embedding,
+                labels,
+                target_label,
+                seed=seed,
+                n_neighbors=int(n_neighbors),
             )
-            rebuilt = rebuild_baseline_representations(
-                adata_sub,
-                rna_pcs=int(rna_pcs),
-                protein_pcs=int(protein_pcs),
-                n_top_genes=int(n_top_genes),
+            row = {
+                "dataset": str(dataset),
+                "target_cell_type": str(target_label),
+                "target_label": str(target_label),
+                "label_key": str(label_key),
+                "fraction": retain_fraction,
+                "retain_fraction": retain_fraction,
+                "seed": seed,
+                "representation": str(representation_name),
+                "n_neighbors": int(n_neighbors),
+                "n_cells_total": int(rebuilt.n_obs),
+                "n_target_original": int(n_target_original),
+            }
+            row.update(metrics)
+            row["n_cells_total"] = row.get("n_cells", row["n_cells_total"])
+            row["n_target_remaining"] = row.get("n_target")
+            row["silhouette_target"] = row.get("silhouette_target", row.get("target_silhouette"))
+            rows.append(row)
+            log.info(
+                "Computed metrics for representation=%s target=%s fraction=%s seed=%s in %.2fs",
+                representation_name,
+                target_label,
+                retain_fraction,
+                seed,
+                time.perf_counter() - metric_started,
             )
-            representation_pairs = resolve_representations(rebuilt, requested_representations)
-            labels = rebuilt.obs[label_key].astype(str).to_numpy()
-            for representation_name, representation_key in representation_pairs:
-                embedding = rebuilt.obsm[representation_key]
-                metrics = compute_all_metrics(
-                    embedding,
-                    labels,
-                    target_label,
-                    seed=int(seed),
-                    n_neighbors=int(n_neighbors),
-                )
-                row = {
-                    "dataset": str(dataset),
-                    "target_cell_type": str(target_label),
-                    "target_label": str(target_label),
-                    "label_key": str(label_key),
-                    "fraction": float(retain_fraction),
-                    "retain_fraction": float(retain_fraction),
-                    "seed": int(seed),
-                    "representation": str(representation_name),
-                    "n_neighbors": int(n_neighbors),
-                    "n_cells_total": int(rebuilt.n_obs),
-                    "n_target_original": int(n_target_original),
-                }
-                row.update(metrics)
-                row["n_cells_total"] = row.get("n_cells", row["n_cells_total"])
-                row["n_target_remaining"] = row.get("n_target")
-                row["silhouette_target"] = row.get("silhouette_target", row.get("target_silhouette"))
-                rows.append(row)
+        log.info(
+            "Finished benchmark condition target=%s fraction=%s seed=%s in %.2fs",
+            target_label,
+            retain_fraction,
+            seed,
+            time.perf_counter() - condition_started,
+        )
 
     results = pd.DataFrame(rows, columns=RESULT_COLUMNS)
     if output_path is not None:
@@ -399,3 +445,199 @@ def write_markdown_report(
     ]
     report_path.write_text("\n".join(content), encoding="utf-8")
     return report_path
+
+
+# ---------------------------------------------------------------------------
+# Summary table generators (from summaries.py)
+# ---------------------------------------------------------------------------
+
+_METRIC_COLS = ["precision", "recall", "f1", "neighborhood_purity", "silhouette_target"]
+_GROUP_COLS = ["target_cell_type", "representation", "fraction"]
+
+
+def make_benchmark_summary(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate raw benchmark results across seeds."""
+    if raw_df.empty:
+        return pd.DataFrame(
+            columns=["target_cell_type", "representation", "fraction", "metric", "mean", "std", "n_seeds", "n_valid"]
+        )
+
+    present_metrics = [m for m in _METRIC_COLS if m in raw_df.columns]
+    fraction_col = "fraction" if "fraction" in raw_df.columns else "retain_fraction"
+
+    rows: list[dict] = []
+    for (target, rep, frac), group in raw_df.groupby(
+            ["target_cell_type", "representation", fraction_col], dropna=False
+    ):
+        n_seeds = int(len(group))
+        for metric in present_metrics:
+            values = pd.to_numeric(group[metric], errors="coerce")
+            valid = values.dropna()
+            rows.append(
+                {
+                    "target_cell_type": str(target),
+                    "representation": str(rep),
+                    "fraction": float(frac),
+                    "metric": metric,
+                    "mean": float(valid.mean()) if len(valid) > 0 else float("nan"),
+                    "std": float(valid.std(ddof=1)) if len(valid) > 1 else 0.0,
+                    "n_seeds": n_seeds,
+                    "n_valid": int(len(valid)),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def make_best_method_summary(summary_df: pd.DataFrame) -> pd.DataFrame:
+    """For each (target_cell_type, fraction, metric), find the best representation."""
+    if summary_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "target_cell_type", "fraction", "metric",
+                "best_representation", "best_mean",
+                "second_best_representation", "second_best_mean", "delta",
+            ]
+        )
+
+    rows: list[dict] = []
+    for (target, frac, metric), group in summary_df.groupby(
+            ["target_cell_type", "fraction", "metric"], dropna=False
+    ):
+        ranked = group.sort_values("mean", ascending=False).reset_index(drop=True)
+        if ranked.empty:
+            continue
+        best_rep = str(ranked.loc[0, "representation"])
+        best_mean = float(ranked.loc[0, "mean"]) if pd.notna(ranked.loc[0, "mean"]) else float("nan")
+        if len(ranked) >= 2:
+            second_rep = str(ranked.loc[1, "representation"])
+            second_mean = float(ranked.loc[1, "mean"]) if pd.notna(ranked.loc[1, "mean"]) else float("nan")
+        else:
+            second_rep = ""
+            second_mean = float("nan")
+        delta = float(best_mean - second_mean) if (pd.notna(best_mean) and pd.notna(second_mean)) else float("nan")
+        rows.append(
+            {
+                "target_cell_type": str(target),
+                "fraction": float(frac),
+                "metric": metric,
+                "best_representation": best_rep,
+                "best_mean": best_mean,
+                "second_best_representation": second_rep,
+                "second_best_mean": second_mean,
+                "delta": delta,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def make_abundant_control_summary(control_df: pd.DataFrame) -> pd.DataFrame:
+    """Summarize abundant-cell control results across seeds."""
+    if control_df.empty:
+        return pd.DataFrame(
+            columns=["target_cell_type", "representation", "fraction", "metric", "mean", "std", "n_seeds", "n_valid"]
+        )
+
+    fraction_col = "fraction" if "fraction" in control_df.columns else "retain_fraction"
+    target_col = "target_cell_type" if "target_cell_type" in control_df.columns else "target_label"
+    present_metrics = [m for m in _METRIC_COLS if m in control_df.columns]
+
+    rows: list[dict] = []
+    for (target, rep, frac), group in control_df.groupby(
+            [target_col, "representation", fraction_col], dropna=False
+    ):
+        n_seeds = int(len(group))
+        for metric in present_metrics:
+            values = pd.to_numeric(group[metric], errors="coerce")
+            valid = values.dropna()
+            rows.append(
+                {
+                    "target_cell_type": str(target),
+                    "representation": str(rep),
+                    "fraction": float(frac),
+                    "metric": metric,
+                    "mean": float(valid.mean()) if len(valid) > 0 else float("nan"),
+                    "std": float(valid.std(ddof=1)) if len(valid) > 1 else 0.0,
+                    "n_seeds": n_seeds,
+                    "n_valid": int(len(valid)),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Control analyses (from controls.py)
+# ---------------------------------------------------------------------------
+
+
+def select_control_cell_type(
+        labels: pd.Series,
+        target: str,
+        requested: str | None = None,
+) -> str | None:
+    """Return the most abundant non-target cell type as the abundant-cell control."""
+    clean = labels.dropna().astype(str)
+    if requested:
+        if str(requested) not in set(clean):
+            raise ValueError(
+                f"Requested control_cell_type '{requested}' is absent from labels. "
+                f"Available: {sorted(set(clean))}."
+            )
+        return str(requested)
+    non_target = clean[clean != str(target)]
+    counts = non_target.value_counts()
+    if counts.empty:
+        return None
+    return str(counts.index[0])
+
+
+def run_random_label_control(
+        adata: Any,
+        label_key: str,
+        target_label: str,
+        representations: list[str],
+        retain_fraction: float,
+        seed: int,
+        n_neighbors: int = 15,
+) -> pd.DataFrame:
+    """Run a single random-label control condition.
+
+    Permutes cell-type labels (preserving marginal distribution) then evaluates
+    all representations on the permuted labels.
+    """
+    adata_sub = downsample_target_cells(
+        adata,
+        label_key=label_key,
+        target_label=target_label,
+        retain_fraction=float(retain_fraction),
+        seed=int(seed),
+    )
+    rebuilt = rebuild_baseline_representations(adata_sub)
+    labels = rebuilt.obs[label_key].astype(str).to_numpy()
+    rng = np.random.default_rng(int(seed))
+    permuted = labels.copy()
+    rng.shuffle(permuted)
+
+    rep_pairs = resolve_representations(rebuilt, representations)
+    rows: list[dict] = []
+    for rep_name, rep_key in rep_pairs:
+        if rep_key not in rebuilt.obsm:
+            continue
+        metrics = compute_all_metrics(
+            rebuilt.obsm[rep_key], permuted, target_label,
+            seed=int(seed), n_neighbors=int(n_neighbors),
+        )
+        rows.append(
+            {
+                "control": "random_label",
+                "target_cell_type": str(target_label),
+                "representation": rep_name,
+                "fraction": float(retain_fraction),
+                "seed": int(seed),
+                "precision": metrics.get("precision", float("nan")),
+                "recall": metrics.get("recall", float("nan")),
+                "f1": metrics.get("f1", float("nan")),
+                "neighborhood_purity": metrics.get("neighborhood_purity", float("nan")),
+                "silhouette_target": metrics.get("silhouette_target", float("nan")),
+            }
+        )
+    return pd.DataFrame(rows)
