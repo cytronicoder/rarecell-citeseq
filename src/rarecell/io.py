@@ -398,6 +398,8 @@ def get_protein_matrix(obj: Any) -> pd.DataFrame:
                 return value.copy()
             if f"{key}_names" in obj.uns:
                 columns = list(obj.uns[f"{key}_names"])
+            elif key == "protein_counts" and "protein_names" in obj.uns:
+                columns = list(obj.uns["protein_names"])
             return matrix_to_dataframe(value, index=obj.obs_names, columns=columns, prefix="protein")
 
     protein_mask = _feature_type_mask(obj, PROTEIN_FEATURE_TYPES)

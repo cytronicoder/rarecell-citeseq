@@ -1,6 +1,6 @@
 ### Data Directory
 
-Place local public CITE-seq data files here. The stepwise scaffold expects one paired RNA and ADT/protein dataset.
+Place local public CITE-seq data files here. The canonical pipeline expects one paired RNA and ADT/protein dataset.
 
 Recommended first dataset:
 
@@ -9,10 +9,8 @@ Recommended first dataset:
 
 Supported input shapes:
 
-- `.h5ad` AnnData with RNA in `.X` and protein counts in `.obsm["protein_expression"]`, `.obsm["protein_counts"]`, or
-  `.obsm["adt"]`.
-- `.h5ad` AnnData containing combined 10x features with `adata.var["feature_types"]` values such as `Gene Expression`
-  and `Antibody Capture`.
+- `.h5ad` AnnData with RNA in `.X` and protein counts in `.obsm["protein_expression"]`, `.obsm["protein_counts"]`, or `.obsm["adt"]`.
+- `.h5ad` AnnData containing combined 10x features with `adata.var["feature_types"]` values such as `Gene Expression` and `Antibody Capture`.
 - `.h5mu` MuData with modalities named `rna` plus one of `prot`, `protein`, `adt`, or `modality2`.
 - scvi 10x dataset specs like `scvi:5k_pbmc_protein_v3_nextgem`, loaded via `scvi.data.dataset_10x`.
 - The short compatibility alias `scvi:pbmc5k` resolves to `scvi:5k_pbmc_protein_v3_nextgem`.

@@ -11,7 +11,6 @@ from typing import Any, Iterable
 
 import numpy as np
 import pandas as pd
-from pandas.api.types import is_numeric_dtype
 from scipy import sparse
 
 from .config import ANNDATA_KEY_TO_REPRESENTATION, REPRESENTATION_ALIASES, REPRESENTATION_KEY_MAP
@@ -125,47 +124,6 @@ def make_output_prefix(dataset_name: str, target_label: str) -> str:
     return f"{slugify_label(dataset_name)}_{slugify_label(target_label)}"
 
 
-def result_path(
-        results_dir: Path,
-        category: str,
-        output_prefix: str,
-        descriptor: str,
-        suffix: str,
-) -> Path:
-    """Return a standardized result path using the double-underscore separator."""
-    filename = f"{output_prefix}__{descriptor}{suffix}"
-    return Path(results_dir) / category / filename
-
-
-def resolve_existing_output_prefix(
-        tables_dir: Path,
-        preferred_prefix: str | None = None,
-        descriptor: str = "benchmark_results",
-        suffix: str = ".csv",
-) -> str:
-    """Return an output prefix with an existing table for descriptor."""
-    tables_path = Path(tables_dir)
-    if preferred_prefix:
-        preferred_path = tables_path / f"{preferred_prefix}__{descriptor}{suffix}"
-        if preferred_path.exists():
-            return preferred_prefix
-
-    matches = sorted(
-        tables_path.glob(f"*__{descriptor}{suffix}"),
-        key=lambda path: (path.stat().st_mtime, path.name),
-        reverse=True,
-    )
-    if matches:
-        marker = f"__{descriptor}{suffix}"
-        return matches[0].name[: -len(marker)]
-
-    expected = f"{preferred_prefix}__{descriptor}{suffix}" if preferred_prefix else f"*__{descriptor}{suffix}"
-    raise FileNotFoundError(
-        f"Results file not found in {tables_path}: {expected}. "
-        "Run notebooks/03_downsampling_benchmark.ipynb first."
-    )
-
-
 # ---------------------------------------------------------------------------
 # Script setup helpers (from script_utils.py)
 # ---------------------------------------------------------------------------
@@ -199,6 +157,10 @@ def resolve_representation_key(adata: Any, representation: str) -> str:
     canonical_key = REPRESENTATION_ALIASES.get(str(representation), str(representation))
     if canonical_key in adata.obsm:
         return canonical_key
+    if str(representation) == "joint_pca":
+        for legacy_key in ("X_joint_simple", "X_joint"):
+            if legacy_key in adata.obsm:
+                return legacy_key
     raise KeyError(f"Representation '{representation}' is missing from adata.obsm as '{canonical_key}'.")
 
 
@@ -220,50 +182,9 @@ def resolve_representations(adata: Any, representations: Iterable[str] | None = 
     return resolved
 
 
-def read_count_table(path: Path) -> pd.DataFrame | None:
-    """Read a known count summary table if present."""
-    if not path.exists():
-        return None
-    table = pd.read_csv(path)
-    return table if not table.empty else None
-
-
 # ---------------------------------------------------------------------------
 # AnnData and results validation (from validation.py)
 # ---------------------------------------------------------------------------
-
-_RESULT_COLUMNS = [
-    "target_label",
-    "label_key",
-    "retain_fraction",
-    "seed",
-    "representation",
-    "n_neighbors",
-    "n_cells",
-    "n_target",
-    "n_other",
-    "target_fraction",
-    "precision",
-    "recall",
-    "f1",
-    "neighborhood_purity",
-    "target_silhouette",
-]
-
-_NUMERIC_COLUMNS = [
-    "retain_fraction",
-    "seed",
-    "n_neighbors",
-    "n_cells",
-    "n_target",
-    "n_other",
-    "target_fraction",
-    "precision",
-    "recall",
-    "f1",
-    "neighborhood_purity",
-    "target_silhouette",
-]
 
 DEFAULT_LABEL_KEY_CANDIDATES = (
     "cell_type_simple",
@@ -275,30 +196,6 @@ DEFAULT_LABEL_KEY_CANDIDATES = (
     "label",
     "leiden",
 )
-
-
-def validate_adata_fields(
-        adata: Any,
-        label_key: str | None = None,
-        representation_keys: list[str] | None = None,
-) -> None:
-    """Validate expected AnnData fields and raise clear errors."""
-    if not hasattr(adata, "obs"):
-        raise ValueError("Expected an AnnData-like object with an .obs table.")
-    if label_key is not None and label_key not in adata.obs:
-        available = list(adata.obs.columns)
-        raise KeyError(
-            f"Label key '{label_key}' is not present in adata.obs. "
-            f"Available columns: {available}."
-        )
-    if representation_keys:
-        available_obsm = list(getattr(adata, "obsm", {}).keys())
-        missing = [k for k in representation_keys if k not in available_obsm]
-        if missing:
-            raise ValueError(
-                f"Missing required adata.obsm representations: {missing}. "
-                f"Available: {available_obsm or '<none>'}."
-            )
 
 
 def find_label_key(adata: Any, candidates: Iterable[str]) -> str:
@@ -343,74 +240,3 @@ def resolve_target_label(adata: Any, label_key: str, preferred: str | None = Non
     count_table["label"] = count_table["label"].astype(str)
     count_table = count_table.sort_values(["n_cells", "label"], kind="mergesort")
     return str(count_table.iloc[0]["label"])
-
-
-def resolve_representation_keys(adata: Any, requested_keys: list[str]) -> list[str]:
-    """Validate that all requested keys exist in adata.obsm."""
-    resolved: list[str] = []
-    for key in requested_keys:
-        if key in adata.obsm:
-            resolved.append(key)
-        else:
-            raise KeyError(
-                f"Representation '{key}' is missing from adata.obsm. "
-                f"Available: {list(adata.obsm.keys())}."
-            )
-    return resolved
-
-
-def validate_results_table(
-        results_df: pd.DataFrame,
-        representation_keys: list[str],
-        retain_fractions: list[float],
-        seeds: list[int],
-) -> None:
-    """Confirm benchmark results contain expected rows and required metric columns."""
-    assert not results_df.empty, "Benchmark results table is empty."
-
-    missing = [c for c in _RESULT_COLUMNS if c not in results_df.columns]
-    assert not missing, f"Results table missing columns: {missing}."
-
-    obs_reps = set(results_df["representation"].astype(str))
-    exp_reps = set(map(str, representation_keys))
-    assert exp_reps.issubset(obs_reps), (
-        f"Missing representation rows. Expected {sorted(exp_reps)}, "
-        f"observed {sorted(obs_reps)}."
-    )
-
-    obs_fracs = set(results_df["retain_fraction"].astype(float))
-    exp_fracs = set(map(float, retain_fractions))
-    assert exp_fracs.issubset(obs_fracs), (
-        f"Missing retain_fraction rows. Expected {sorted(exp_fracs)}, "
-        f"observed {sorted(obs_fracs)}."
-    )
-
-    obs_seeds = set(results_df["seed"].astype(int))
-    exp_seeds = set(map(int, seeds))
-    assert exp_seeds.issubset(obs_seeds), (
-        f"Missing seed rows. Expected {sorted(exp_seeds)}, "
-        f"observed {sorted(obs_seeds)}."
-    )
-
-    non_numeric = [
-        c
-        for c in _NUMERIC_COLUMNS
-        if c in results_df and not is_numeric_dtype(results_df[c])
-    ]
-    assert not non_numeric, (
-        f"Expected numeric metric/count columns, found non-numeric: {non_numeric}."
-    )
-
-    ordered = (
-        results_df.groupby(["representation", "seed", "retain_fraction"], dropna=False)["n_target"]
-        .max()
-        .reset_index()
-    )
-    for (rep, seed), group in ordered.groupby(["representation", "seed"], dropna=False):
-        group = group.sort_values("retain_fraction")
-        counts = group["n_target"].to_numpy(dtype=float)
-        if counts.size > 1:
-            assert bool(np.all(np.diff(counts) >= 0)), (
-                f"n_target should not increase as retain_fraction decreases "
-                f"for representation={rep}, seed={seed}."
-            )

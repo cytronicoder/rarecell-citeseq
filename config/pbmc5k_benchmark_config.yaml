@@ -1,9 +1,0 @@
-dataset: pbmc5k_10x_citeseq
-dataset_path: data/processed/pbmc5k_10x_citeseq_representations.h5ad
-label_column: leiden
-target_cell_type: "15"
-control_cell_type: null
-fractions: [ 1.0, 0.5, 0.25, 0.1, 0.05 ]
-seeds: [ 0, 1, 2, 3, 4 ]
-representations: [ rna_pca, protein_pca, joint_pca ]
-k_neighbors: 15

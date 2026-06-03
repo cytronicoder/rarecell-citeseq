@@ -1,11 +1,13 @@
 import numpy as np
 import pandas as pd
+import pytest
+
+ad = pytest.importorskip("anndata")
 
 from rarecell.representations import (
+    build_joint_representation,
     compute_joint_pca_representation,
     compute_protein_pca,
-    compute_umap_from_embedding,
-    save_embedding,
 )
 
 
@@ -17,13 +19,6 @@ def test_protein_pca_returns_expected_shape():
     assert list(embedding.index) == list(protein.index)
 
 
-def test_joint_representation_aligns_cell_counts():
-    rna = pd.DataFrame(np.ones((5, 3)), index=[f"cell{i}" for i in range(5)])
-    protein = pd.DataFrame(np.ones((5, 2)), index=[f"cell{i}" for i in range(5)])
-    joint = compute_joint_pca_representation(rna, protein)
-    assert joint.shape == (5, 5)
-
-
 def test_joint_representation_aligns_by_cell_index():
     rna = pd.DataFrame(np.ones((3, 2)), index=["a", "b", "c"], columns=["r1", "r2"])
     protein = pd.DataFrame(np.ones((3, 2)), index=["c", "a", "b"], columns=["p1", "p2"])
@@ -32,18 +27,13 @@ def test_joint_representation_aligns_by_cell_index():
     assert list(joint.columns) == ["joint_rna_r1", "joint_rna_r2", "joint_protein_p1", "joint_protein_p2"]
 
 
-def test_umap_from_embedding_preserves_index_for_tiny_data():
-    embedding = pd.DataFrame(
-        [[1.0, 0.0], [0.0, 1.0]],
-        index=["cell_a", "cell_b"],
-        columns=["PC1", "PC2"],
-    )
-    umap = compute_umap_from_embedding(embedding)
-    assert list(umap.columns) == ["UMAP1", "UMAP2"]
-    assert list(umap.index) == ["cell_a", "cell_b"]
-
-
-def test_save_embedding_csv(tmp_path):
-    embedding = pd.DataFrame(np.ones((3, 2)), index=["a", "b", "c"], columns=["UMAP1", "UMAP2"])
-    out = save_embedding(embedding, tmp_path / "embedding.csv")
-    assert out.exists()
+def test_build_joint_representation_writes_canonical_key():
+    obs = pd.DataFrame(index=["a", "b", "c", "d"])
+    var = pd.DataFrame(index=["g1", "g2"])
+    adata = ad.AnnData(np.ones((4, 2)), obs=obs, var=var)
+    adata.obsm["X_rna_pca"] = np.arange(8).reshape(4, 2)
+    adata.obsm["X_protein_pca"] = np.arange(12).reshape(4, 3)
+    result = build_joint_representation(adata)
+    assert "X_joint_pca" in result.obsm
+    assert "X_joint_simple" not in result.obsm
+    assert result.obsm["X_joint_pca"].shape == (4, 5)

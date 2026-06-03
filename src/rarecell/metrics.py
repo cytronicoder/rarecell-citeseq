@@ -12,8 +12,6 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
     precision_score,
     recall_score,
-    roc_auc_score,
-    silhouette_samples,
     silhouette_score,
 )
 from sklearn.model_selection import train_test_split
@@ -235,29 +233,6 @@ def target_silhouette_score(
         return float(np.nan)
 
 
-def marker_auc(
-        values,
-        labels,
-        target_label: str,
-) -> float:
-    """Compute ROC-AUC for one marker vector against target-vs-other labels."""
-    marker_values = np.asarray(values).reshape(-1).astype(float)
-    if marker_values.shape[0] != len(labels):
-        raise ValueError("Marker values and labels must have the same length.")
-    if marker_values.shape[0] == 0 or not np.isfinite(marker_values).all() or _labels_have_nan(labels):
-        return float(np.nan)
-    label_values = np.asarray(labels).astype(str)
-    if marker_values.shape[0] != label_values.shape[0]:
-        raise ValueError("Marker values and labels must have the same length.")
-    y = (label_values == str(target_label)).astype(int)
-    if len(np.unique(y)) < 2:
-        return float(np.nan)
-    try:
-        return float(roc_auc_score(y, marker_values))
-    except ValueError:
-        return float(np.nan)
-
-
 def compute_knn_predictions(embedding, labels, k: int = 15) -> np.ndarray:
     """Predict each cell label from its nearest neighbors in the embedding."""
     values = _as_2d_array(embedding)
@@ -306,58 +281,6 @@ def compute_rare_cell_precision_recall_f1(
         zero_division=0,
     )
     return {"precision": float(precision), "recall": float(recall), "f1": float(f1)}
-
-
-def compute_neighborhood_purity(embedding, labels, target_label: str, k: int = 15) -> float:
-    """Return target-cell neighborhood purity, warning when undefined."""
-    value = neighborhood_purity(embedding, labels, target_label, k=k)
-    if np.isnan(value):
-        warnings.warn("Neighborhood purity is undefined for this condition.")
-    return value
-
-
-def compute_silhouette_for_target(embedding, labels, target_label: str) -> float:
-    """Return mean silhouette for target cells in a target-vs-other labeling."""
-    values = _as_2d_array(embedding)
-    label_values = np.asarray(labels).astype(str)
-    if values.shape[0] != label_values.shape[0]:
-        raise ValueError("Embedding rows and labels must have the same length.")
-    if _invalid_embedding_or_labels(values, label_values):
-        warnings.warn("Silhouette is undefined for this embedding/label input.")
-        return float(np.nan)
-    y = (label_values == str(target_label)).astype(int)
-    n_positive = int(y.sum())
-    n_negative = int(y.shape[0] - n_positive)
-    if len(np.unique(y)) < 2 or n_positive < 2 or n_negative < 2 or values.shape[0] < 3:
-        warnings.warn("Silhouette is undefined with too few target or non-target cells.")
-        return float(np.nan)
-    try:
-        samples = silhouette_samples(values, y)
-        return float(np.mean(samples[y == 1]))
-    except ValueError:
-        warnings.warn("Silhouette calculation failed for this condition.")
-        return float(np.nan)
-
-
-def summarize_metric_by_group(
-        df,
-        group_cols,
-        metric_cols,
-) -> pd.DataFrame:
-    """Summarize metric columns by group with mean, std, sem, and count."""
-    group_cols = list(group_cols)
-    metric_cols = list(metric_cols)
-    if df.empty:
-        columns = group_cols + [
-            f"{metric}_{stat}"
-            for metric in metric_cols
-            for stat in ("mean", "std", "sem", "count")
-        ]
-        return pd.DataFrame(columns=columns)
-
-    summary = df.groupby(group_cols, dropna=False)[metric_cols].agg(["mean", "std", "sem", "count"])
-    summary.columns = [f"{metric}_{stat}" for metric, stat in summary.columns]
-    return summary.reset_index()
 
 
 def class_balance_metrics(labels, target_label: str) -> dict[str, float | int]:

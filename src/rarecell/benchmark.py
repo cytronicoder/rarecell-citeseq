@@ -1,4 +1,4 @@
-"""Benchmark runner, result validation, summaries, and reports."""
+"""Benchmark runner, validation, summaries, and minimal controls."""
 
 from __future__ import annotations
 
@@ -11,21 +11,22 @@ import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
 
-from rarecell.config import REPRESENTATION_KEY_MAP
+from rarecell.config import (
+    FIGURES_DIR,
+    INTERMEDIATE_DIR,
+    LOGS_DIR,
+    METRICS_DIR,
+    PROJECT_ROOT,
+    REPRESENTATION_KEY_MAP,
+    REPORTS_DIR,
+    RESULTS_DIR,
+    TABLES_DIR,
+)
 from rarecell.downsampling import downsample_target_cells, validate_target_label
 from rarecell.metrics import compute_all_metrics
 from rarecell.preprocessing import preprocess_protein, preprocess_rna
 from rarecell.representations import build_joint_representation
 from rarecell.utils import resolve_representations, standard_representation_name
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-RESULTS_DIR = PROJECT_ROOT / "results"
-TABLES_DIR = RESULTS_DIR / "tables"
-FIGURES_DIR = RESULTS_DIR / "figures"
-METRICS_DIR = RESULTS_DIR / "metrics"
-LOGS_DIR = RESULTS_DIR / "logs"
-INTERMEDIATE_DIR = RESULTS_DIR / "intermediate"
-REPORTS_DIR = RESULTS_DIR / "reports"
 
 RESULT_COLUMNS = [
     "dataset",
@@ -356,212 +357,6 @@ def make_metric_summary(results_df: pd.DataFrame) -> pd.DataFrame:
         for column in summary.columns
     ]
     return summary
-
-
-def _markdown_table(df: pd.DataFrame) -> str:
-    if df.empty:
-        return ""
-    formatted = df.copy()
-    for column in formatted.columns:
-        if is_numeric_dtype(formatted[column]):
-            formatted[column] = formatted[column].map(
-                lambda value: "" if pd.isna(value) else f"{float(value):.4g}"
-            )
-        else:
-            formatted[column] = formatted[column].astype(str)
-    header = "| " + " | ".join(map(str, formatted.columns)) + " |"
-    separator = "| " + " | ".join(["---"] * len(formatted.columns)) + " |"
-    body = [
-        "| " + " | ".join(str(value) for value in row) + " |"
-        for row in formatted.to_numpy()
-    ]
-    return "\n".join([header, separator, *body])
-
-
-def write_markdown_report(
-        output_prefix: str,
-        input_file: str,
-        label_key: str,
-        target_label: str,
-        representation_keys: list[str],
-        retain_fractions: list[float],
-        seeds: list[int],
-        n_neighbors: int,
-        n_cells: int,
-        original_target_cells: int,
-        n_cell_types: int,
-        output_files: list[str],
-        metric_summary: pd.DataFrame,
-) -> Path:
-    """Write the automatic Markdown benchmark report to results/reports/."""
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    report_path = REPORTS_DIR / f"{output_prefix}__benchmark_report.md"
-
-    preferred_columns = [
-        "representation",
-        "retain_fraction",
-        "f1_mean",
-        "recall_mean",
-        "neighborhood_purity_mean",
-    ]
-    available_columns = [column for column in preferred_columns if column in metric_summary.columns]
-    table = _markdown_table(metric_summary[available_columns]) if available_columns else ""
-
-    figures = [path for path in output_files if "/figures/" in path or path.startswith("results/figures/")]
-    logs = [path for path in output_files if "/logs/" in path or path.startswith("results/logs/")]
-    results_csv = f"results/tables/{output_prefix}__benchmark_results.csv"
-    results_parquet = f"results/metrics/{output_prefix}__benchmark_results.parquet"
-    parquet_exists = (METRICS_DIR / f"{output_prefix}__benchmark_results.parquet").exists()
-
-    content = [
-        "# Rare-cell downsampling benchmark report",
-        "",
-        "## Input",
-        f"- Input file: {input_file}",
-        f"- Label key: {label_key}",
-        f"- Target label: {target_label}",
-        f"- Representations: {', '.join(map(str, representation_keys))}",
-        f"- Retain fractions: {', '.join(map(str, retain_fractions))}",
-        f"- Seeds: {', '.join(map(str, seeds))}",
-        f"- n_neighbors: {n_neighbors}",
-        "",
-        "## Dataset summary",
-        f"- Total cells: {n_cells}",
-        f"- Original target cells: {original_target_cells}",
-        f"- Number of cell types: {n_cell_types}",
-        "",
-        "## Output files",
-        f"- Results CSV: {results_csv}",
-        f"- Results parquet: {results_parquet if parquet_exists else 'Skipped or unavailable'}",
-        f"- Figures: {', '.join(figures) if figures else 'None'}",
-        f"- Logs: {', '.join(logs) if logs else 'None'}",
-        "",
-        "## Main metric summary",
-        table,
-        "",
-        "## Notes",
-        "- This is an automatically generated report.",
-        "",
-    ]
-    report_path.write_text("\n".join(content), encoding="utf-8")
-    return report_path
-
-
-# ---------------------------------------------------------------------------
-# Summary table generators (from summaries.py)
-# ---------------------------------------------------------------------------
-
-_METRIC_COLS = ["precision", "recall", "f1", "neighborhood_purity", "silhouette_target"]
-_GROUP_COLS = ["target_cell_type", "representation", "fraction"]
-
-
-def make_benchmark_summary(raw_df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate raw benchmark results across seeds."""
-    if raw_df.empty:
-        return pd.DataFrame(
-            columns=["target_cell_type", "representation", "fraction", "metric", "mean", "std", "n_seeds", "n_valid"]
-        )
-
-    present_metrics = [m for m in _METRIC_COLS if m in raw_df.columns]
-    fraction_col = "fraction" if "fraction" in raw_df.columns else "retain_fraction"
-
-    rows: list[dict] = []
-    for (target, rep, frac), group in raw_df.groupby(
-            ["target_cell_type", "representation", fraction_col], dropna=False
-    ):
-        n_seeds = int(len(group))
-        for metric in present_metrics:
-            values = pd.to_numeric(group[metric], errors="coerce")
-            valid = values.dropna()
-            rows.append(
-                {
-                    "target_cell_type": str(target),
-                    "representation": str(rep),
-                    "fraction": float(frac),
-                    "metric": metric,
-                    "mean": float(valid.mean()) if len(valid) > 0 else float("nan"),
-                    "std": float(valid.std(ddof=1)) if len(valid) > 1 else 0.0,
-                    "n_seeds": n_seeds,
-                    "n_valid": int(len(valid)),
-                }
-            )
-    return pd.DataFrame(rows)
-
-
-def make_best_method_summary(summary_df: pd.DataFrame) -> pd.DataFrame:
-    """For each (target_cell_type, fraction, metric), find the best representation."""
-    if summary_df.empty:
-        return pd.DataFrame(
-            columns=[
-                "target_cell_type", "fraction", "metric",
-                "best_representation", "best_mean",
-                "second_best_representation", "second_best_mean", "delta",
-            ]
-        )
-
-    rows: list[dict] = []
-    for (target, frac, metric), group in summary_df.groupby(
-            ["target_cell_type", "fraction", "metric"], dropna=False
-    ):
-        ranked = group.sort_values("mean", ascending=False).reset_index(drop=True)
-        if ranked.empty:
-            continue
-        best_rep = str(ranked.loc[0, "representation"])
-        best_mean = float(ranked.loc[0, "mean"]) if pd.notna(ranked.loc[0, "mean"]) else float("nan")
-        if len(ranked) >= 2:
-            second_rep = str(ranked.loc[1, "representation"])
-            second_mean = float(ranked.loc[1, "mean"]) if pd.notna(ranked.loc[1, "mean"]) else float("nan")
-        else:
-            second_rep = ""
-            second_mean = float("nan")
-        delta = float(best_mean - second_mean) if (pd.notna(best_mean) and pd.notna(second_mean)) else float("nan")
-        rows.append(
-            {
-                "target_cell_type": str(target),
-                "fraction": float(frac),
-                "metric": metric,
-                "best_representation": best_rep,
-                "best_mean": best_mean,
-                "second_best_representation": second_rep,
-                "second_best_mean": second_mean,
-                "delta": delta,
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def make_abundant_control_summary(control_df: pd.DataFrame) -> pd.DataFrame:
-    """Summarize abundant-cell control results across seeds."""
-    if control_df.empty:
-        return pd.DataFrame(
-            columns=["target_cell_type", "representation", "fraction", "metric", "mean", "std", "n_seeds", "n_valid"]
-        )
-
-    fraction_col = "fraction" if "fraction" in control_df.columns else "retain_fraction"
-    target_col = "target_cell_type" if "target_cell_type" in control_df.columns else "target_label"
-    present_metrics = [m for m in _METRIC_COLS if m in control_df.columns]
-
-    rows: list[dict] = []
-    for (target, rep, frac), group in control_df.groupby(
-            [target_col, "representation", fraction_col], dropna=False
-    ):
-        n_seeds = int(len(group))
-        for metric in present_metrics:
-            values = pd.to_numeric(group[metric], errors="coerce")
-            valid = values.dropna()
-            rows.append(
-                {
-                    "target_cell_type": str(target),
-                    "representation": str(rep),
-                    "fraction": float(frac),
-                    "metric": metric,
-                    "mean": float(valid.mean()) if len(valid) > 0 else float("nan"),
-                    "std": float(valid.std(ddof=1)) if len(valid) > 1 else 0.0,
-                    "n_seeds": n_seeds,
-                    "n_valid": int(len(valid)),
-                }
-            )
-    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------

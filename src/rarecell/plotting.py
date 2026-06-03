@@ -86,25 +86,9 @@ def save_figure(
     return saved
 
 
-def _save_fig(fig, output_path: str | Path, dpi: int = 300) -> Path:
-    """Save a matplotlib figure to a single path (extension preserved)."""
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=dpi, bbox_inches="tight")
-    return out
-
-
 def _apply_style() -> None:
     set_plot_style()
 
-
-METHOD_ORDER = ("RNA-only PCA", "Protein-only PCA", "RNA + protein PCA")
-
-METHOD_COLORS = {
-    "RNA-only PCA": "#4C78A8",
-    "Protein-only PCA": "#F58518",
-    "RNA + protein PCA": "#54A24B",
-}
 
 REPRESENTATION_LABELS = {
     "rna_pca": "RNA-only PCA",
@@ -125,7 +109,6 @@ METRIC_LABELS = {
     "macro_f1": "Macro-F1 across cell types",
     "neighborhood_purity": "Target-cell neighborhood purity",
     "target_silhouette": "Target-vs-other silhouette score",
-    "marker_auc": "Marker ROC-AUC",
 }
 
 PANEL_METRIC_TITLES = {
@@ -146,31 +129,6 @@ def get_method_display_name(value: str) -> str:
     return REPRESENTATION_LABELS.get(str(value), str(value).replace("_", " "))
 
 
-def order_methods(values) -> list[str]:
-    """Return methods in the shared plotting order, preserving unknown methods afterward."""
-    unique = list(dict.fromkeys(str(value) for value in values if pd.notna(value)))
-
-    def sort_key(value: str) -> tuple[int, int | str]:
-        display = get_method_display_name(value)
-        if display in METHOD_ORDER:
-            return (0, METHOD_ORDER.index(display))
-        return (1, display)
-
-    return sorted(unique, key=sort_key)
-
-
-def get_method_colors(values=None) -> dict[str, str]:
-    """Return stable colors keyed by both internal and display method labels."""
-    colors = dict(METHOD_COLORS)
-    if values is not None:
-        fallback = plt.get_cmap("tab10")
-        for index, value in enumerate(order_methods(values)):
-            display = get_method_display_name(value)
-            colors.setdefault(display, fallback(index % fallback.N))
-            colors[str(value)] = colors[display]
-    return colors
-
-
 def format_metric_label(value: str) -> str:
     """Return a human-readable metric label."""
     return METRIC_LABELS.get(str(value), str(value).replace("_", " "))
@@ -188,46 +146,6 @@ def format_fraction_label(value) -> str:
 def format_fraction_labels(values) -> list[str]:
     """Return readable retained-fraction labels for a sequence of values."""
     return [format_fraction_label(value) for value in values]
-
-
-def place_legend_outside(
-        ax,
-        *,
-        handles=None,
-        labels=None,
-        title: str = "Representation",
-        location: str = "right",
-        ncol: int | None = None,
-):
-    """Place a legend outside the data area without colliding with titles."""
-    if handles is None or labels is None:
-        handles, labels = ax.get_legend_handles_labels()
-    if not handles:
-        return None
-    if location == "bottom":
-        return ax.legend(
-            handles,
-            labels,
-            title=title,
-            loc="upper center",
-            bbox_to_anchor=(0.5, -0.18),
-            ncol=ncol or min(3, len(labels)),
-            frameon=False,
-            fontsize=9,
-            title_fontsize=10,
-            borderaxespad=0,
-        )
-    return ax.legend(
-        handles,
-        labels,
-        title=title,
-        loc="center left",
-        bbox_to_anchor=(1.02, 0.5),
-        frameon=False,
-        fontsize=9,
-        title_fontsize=10,
-        borderaxespad=0,
-    )
 
 
 def format_category_label(value: str) -> str:
@@ -463,230 +381,8 @@ def plot_recovery_curve(
     return out
 
 
-def _metric_fraction_column(table: pd.DataFrame) -> str:
-    if "fraction" in table.columns:
-        return "fraction"
-    if "retain_fraction" in table.columns:
-        return "retain_fraction"
-    raise KeyError("Expected a 'fraction' or 'retain_fraction' column.")
-
-
-def _target_title(target: str) -> str:
-    return f"Target: {format_category_label(target)}"
-
-
-def _set_unit_interval_ylim(ax, values: pd.Series, errors: pd.Series | None = None) -> None:
-    clean = pd.to_numeric(values, errors="coerce").dropna()
-    if clean.empty:
-        ax.set_ylim(0, 1)
-        return
-    lower = clean.min()
-    upper = clean.max()
-    if errors is not None:
-        err = pd.to_numeric(errors, errors="coerce").fillna(0)
-        lower = min(lower, (clean - err).min())
-        upper = max(upper, (clean + err).max())
-    if lower >= 0 and upper <= 1.05:
-        ax.set_ylim(0, 1)
-
-
-def plot_multi_target_metric_curve(
-        raw_df: pd.DataFrame,
-        metric: str,
-        output_path: str | Path,
-        title: str | None = None,
-) -> Path:
-    """Plot a multi-target benchmark metric curve with variability across seeds."""
-    if raw_df.empty or metric not in raw_df.columns:
-        out = Path(output_path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        fig, ax = plt.subplots(figsize=(6.5, 3.2))
-        ax.text(0.5, 0.5, f"{metric} data unavailable.", ha="center", va="center")
-        ax.set_title(title or "Multi-target benchmark")
-        ax.set_axis_off()
-        _save_fig(fig, out)
-        plt.close(fig)
-        return out
-    table = raw_df.copy()
-    fraction_col = _metric_fraction_column(table)
-    if "representation" not in table.columns:
-        raise KeyError("Column 'representation' is required for multi-target metric plotting.")
-    if "target_cell_type" not in table.columns:
-        table["target_cell_type"] = "target population"
-    table[metric] = pd.to_numeric(table[metric], errors="coerce")
-    summary = (
-        table.groupby(["target_cell_type", "representation", fraction_col], dropna=False)[metric]
-        .agg(["mean", "sem"])
-        .reset_index()
-    )
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    targets = list(dict.fromkeys(summary["target_cell_type"].astype(str)))
-    n_targets = max(1, len(targets))
-    fig_width = min(13, max(6.4, 4.2 * n_targets + 1.6))
-    fig, axes = plt.subplots(1, n_targets, figsize=(fig_width, 4.2), squeeze=False)
-    colors = get_method_colors(summary["representation"])
-    for ax, target in zip(axes[0], targets):
-        target_table = summary.loc[summary["target_cell_type"].astype(str) == target]
-        position_map = _fraction_axis_positions(target_table[fraction_col])
-        for representation in order_methods(target_table["representation"]):
-            group = target_table.loc[target_table["representation"].astype(str) == representation]
-            group = group.sort_values(fraction_col, ascending=False)
-            x_positions = group[fraction_col].astype(float).map(position_map)
-            ax.errorbar(
-                x_positions,
-                group["mean"],
-                yerr=group["sem"].fillna(0),
-                marker="o",
-                linewidth=1.6,
-                capsize=2,
-                markersize=4.5,
-                color=colors.get(str(representation), colors.get(get_method_display_name(str(representation)))),
-                label=get_method_display_name(str(representation)),
-            )
-        _set_fraction_axis(ax, position_map)
-        if n_targets > 1:
-            ax.set_title(_target_title(target), fontsize=12, pad=6)
-        else:
-            ax.set_title("", pad=0)
-        ax.set_xlabel("Retained target-cell fraction")
-        ax.set_ylabel(format_metric_label(metric))
-        if metric in {"f1", "precision", "recall", "neighborhood_purity", "marker_auc"}:
-            _set_unit_interval_ylim(ax, target_table["mean"], target_table["sem"])
-        ax.grid(alpha=0.25)
-        _style_axes(ax)
-    handles, labels = axes[0][0].get_legend_handles_labels()
-    if handles:
-        fig.legend(
-            handles,
-            labels,
-            title="Representation",
-            loc="center left",
-            bbox_to_anchor=(1.005, 0.5),
-            frameon=False,
-            fontsize=9,
-            title_fontsize=10,
-        )
-    default_title = f"{format_metric_label(metric)} across target cell types"
-    if n_targets == 1:
-        default_title = f"{format_metric_label(metric)} under controlled downsampling"
-    fig.suptitle(title or default_title, fontsize=15, y=0.97)
-    fig.subplots_adjust(left=0.11, right=0.78 if handles else 0.96, top=0.84, bottom=0.17, wspace=0.35)
-    _save_fig(fig, out)
-    plt.close(fig)
-    return out
-
-
-def plot_cross_target_method_ranking(ranking_df: pd.DataFrame, output_path: str | Path) -> Path:
-    """Plot mean cross-target rank for each representation and metric."""
-    if ranking_df.empty:
-        return _save_placeholder(
-            output_path,
-            "Cross-target method ranking",
-            "Cross-target method ranking table is unavailable.",
-        )
-    table = ranking_df.copy()
-    table["mean_rank"] = pd.to_numeric(table["mean_rank"], errors="coerce")
-    metrics = list(dict.fromkeys(table["metric"].astype(str)))
-    reps = order_methods(table["representation"])
-    x = np.arange(len(reps))
-    width = 0.8 / max(1, len(metrics))
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(max(7, 1.25 * len(reps)), 4.2))
-    for index, metric in enumerate(metrics):
-        values = (
-            table.loc[table["metric"].astype(str) == metric]
-            .set_index("representation")["mean_rank"]
-            .reindex(reps)
-        )
-        ax.bar(x - 0.4 + width / 2 + index * width, values, width=width, label=format_metric_label(metric))
-    ax.set_xticks(x)
-    ax.set_xticklabels([get_method_display_name(rep) for rep in reps], rotation=20, ha="right")
-    ax.set_ylabel("Mean rank across benchmark conditions")
-    ax.set_title("Cross-target method ranking", fontsize=15, pad=8)
-    ax.invert_yaxis()
-    ax.text(
-        0.01,
-        0.98,
-        "Lower rank is better",
-        transform=ax.transAxes,
-        ha="left",
-        va="top",
-        fontsize=9,
-        color="#555555",
-    )
-    if len(metrics) > 1:
-        place_legend_outside(ax, title="Metric")
-    ax.grid(axis="y", alpha=0.25)
-    _style_axes(ax)
-    fig.subplots_adjust(right=0.78 if len(metrics) > 1 else 0.96, top=0.88, bottom=0.25)
-    _save_fig(fig, out)
-    plt.close(fig)
-    return out
-
-
-def plot_study_design(output_path: str | Path, config: dict | None = None) -> Path:
-    """Draw a schematic study design figure for the benchmark workflow."""
-    cfg = config or {}
-    targets = cfg.get("target_cell_types") or [cfg.get("target_cell_type", "target cell types")]
-    fractions = cfg.get("fractions", [1.0, 0.5, 0.25, 0.1, 0.05])
-    reps = cfg.get("representations", ["rna_pca", "protein_pca", "joint_pca"])
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(12, 3.0))
-    ax.set_axis_off()
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    target_text = "\n".join(map(str, targets[:3]))
-    if len(targets) > 3:
-        target_text += f"\n+{len(targets) - 3} more"
-    boxes = [
-        ("CITE-seq input", "RNA matrix\nprotein counts\ncell labels"),
-        ("Target populations", target_text),
-        ("Controlled\ndownsampling", ", ".join(format_fraction_label(v) for v in fractions)),
-        ("Representations", "\n".join(get_method_display_name(v) for v in reps)),
-        ("Metrics", "F1 score\nneighborhood purity\nmarker ROC-AUC"),
-    ]
-    x_positions = np.linspace(0.095, 0.905, len(boxes))
-    for i, ((heading, body), x_pos) in enumerate(zip(boxes, x_positions)):
-        rect = plt.Rectangle(
-            (x_pos - 0.078, 0.24),
-            0.156,
-            0.5,
-            facecolor="#F3F4F6",
-            edgecolor="#4B5563",
-            lw=1.1,
-        )
-        ax.add_patch(rect)
-        ax.text(x_pos, 0.62, heading, ha="center", va="center", fontsize=10, weight="bold", linespacing=1.05)
-        ax.text(x_pos, 0.42, body, ha="center", va="center", fontsize=8.5, linespacing=1.1)
-        if i < len(boxes) - 1:
-            ax.annotate(
-                "",
-                xy=(x_positions[i + 1] - 0.085, 0.49),
-                xytext=(x_pos + 0.085, 0.49),
-                arrowprops={"arrowstyle": "->", "lw": 1.2, "color": "#4B5563"},
-            )
-    fig.suptitle("Rare-cell preservation benchmark study design", fontsize=14, y=0.95)
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.88, bottom=0.06)
-    _save_fig(fig, out)
-    plt.close(fig)
-    return out
-
-
-def plot_final_figure_2_main_benchmark(raw_df: pd.DataFrame, output_path: str | Path) -> Path:
-    """Save the main multi-target F1 benchmark figure."""
-    return plot_multi_target_metric_curve(
-        raw_df,
-        metric="f1",
-        output_path=output_path,
-        title="Rare-cell recovery under controlled downsampling",
-    )
-
-
 # ---------------------------------------------------------------------------
-# Standard benchmark figure set (from benchmark_plots.py)
+# Standard benchmark figure set
 # ---------------------------------------------------------------------------
 
 _METRIC_DESCRIPTORS: dict[str, tuple[str, str]] = {

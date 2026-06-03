@@ -1,9 +1,7 @@
-"""Baseline representation and embedding utilities."""
+"""Baseline RNA, protein, and joint PCA representations."""
 
 from __future__ import annotations
 
-import warnings
-from pathlib import Path
 from typing import Any
 
 import anndata as ad
@@ -85,7 +83,7 @@ def build_joint_representation(
         adata: ad.AnnData,
         rna_key: str = "X_rna_pca",
         protein_key: str = "X_protein_pca",
-        output_key: str = "X_joint_simple",
+        output_key: str = "X_joint_pca",
         scale_blocks: bool = True,
 ) -> ad.AnnData:
     """Store a standardized RNA+protein PCA concatenation in ``adata.obsm``."""
@@ -103,50 +101,3 @@ def build_joint_representation(
         raise ValueError(f"Joint representation '{output_key}' contains NaN or infinite values.")
     adata.obsm[output_key] = values
     return adata
-
-
-def compute_umap_from_embedding(
-        embedding: pd.DataFrame | np.ndarray,
-        n_neighbors: int = 15,
-        min_dist: float = 0.5,
-        random_state: int = 0,
-) -> pd.DataFrame:
-    """Compute a two-dimensional UMAP from an embedding matrix."""
-    emb = embedding if isinstance(embedding, pd.DataFrame) else pd.DataFrame(to_dense_array(embedding))
-    if emb.shape[0] < 3:
-        values = emb.iloc[:, :2].to_numpy()
-        if values.shape[1] == 1:
-            values = np.column_stack([values[:, 0], np.zeros(values.shape[0])])
-        return pd.DataFrame(values, index=emb.index, columns=["UMAP1", "UMAP2"])
-
-    try:
-        import scanpy as sc
-
-        adata = ad.AnnData(emb.to_numpy(), obs=pd.DataFrame(index=emb.index))
-        sc.pp.neighbors(adata, n_neighbors=min(n_neighbors, emb.shape[0] - 1), use_rep="X")
-        sc.tl.umap(adata, min_dist=min_dist, random_state=random_state)
-        values = adata.obsm["X_umap"]
-    except Exception as exc:
-        warnings.warn(f"UMAP computation failed; using first two embedding dimensions. {exc}")
-        values = emb.iloc[:, :2].to_numpy()
-        if values.shape[1] == 1:
-            values = np.column_stack([values[:, 0], np.zeros(values.shape[0])])
-    return pd.DataFrame(values, index=emb.index, columns=["UMAP1", "UMAP2"])
-
-
-def save_embedding(embedding: pd.DataFrame | np.ndarray, path: str | Path) -> Path:
-    """Save an embedding as CSV or NPY depending on file suffix."""
-    out = Path(path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if isinstance(embedding, pd.DataFrame):
-        if out.suffix.lower() == ".npy":
-            np.save(out, embedding.to_numpy())
-        else:
-            embedding.to_csv(out)
-    else:
-        values = to_dense_array(embedding)
-        if out.suffix.lower() == ".npy":
-            np.save(out, values)
-        else:
-            pd.DataFrame(values).to_csv(out)
-    return out

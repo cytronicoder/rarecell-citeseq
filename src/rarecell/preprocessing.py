@@ -12,7 +12,7 @@ from scipy import sparse
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-from .utils import matrix_to_dataframe, safe_n_components, to_dense_array
+from .utils import matrix_to_dataframe, safe_n_components
 
 
 def _normalize_total_log1p(adata: ad.AnnData, target_sum: float) -> None:
@@ -31,19 +31,6 @@ def _normalize_total_log1p(adata: ad.AnnData, target_sum: float) -> None:
         scale = np.divide(target_sum, totals, out=np.zeros_like(totals), where=totals > 0)
         adata.X = np.log1p(values * scale[:, None])
     adata.uns["log1p"] = {"base": None}
-
-
-def safe_standardize(matrix: pd.DataFrame | np.ndarray) -> pd.DataFrame | np.ndarray:
-    """Standardize features while preserving DataFrame metadata when present."""
-    is_dataframe = isinstance(matrix, pd.DataFrame)
-    index = matrix.index if is_dataframe else None
-    columns = matrix.columns if is_dataframe else None
-    values = matrix.to_numpy() if is_dataframe else to_dense_array(matrix)
-    values = np.nan_to_num(values, copy=False)
-    scaled = StandardScaler().fit_transform(values)
-    if is_dataframe:
-        return pd.DataFrame(scaled, index=index, columns=columns)
-    return scaled
 
 
 def preprocess_rna(
@@ -170,10 +157,9 @@ def _preprocess_protein_matrix(protein_matrix: Any) -> pd.DataFrame:
     values = protein.to_numpy(dtype=float)
     if np.nanmin(values) >= 0:
         values = np.log1p(values)
-    transformed = pd.DataFrame(values, index=protein.index, columns=protein.columns)
-    standardized = safe_standardize(transformed)
-    assert isinstance(standardized, pd.DataFrame)
-    return standardized
+    values = np.nan_to_num(values, copy=False)
+    scaled = StandardScaler().fit_transform(values)
+    return pd.DataFrame(scaled, index=protein.index, columns=protein.columns)
 
 
 def preprocess_protein(protein_matrix: Any, n_components: int = 20) -> pd.DataFrame | ad.AnnData:
